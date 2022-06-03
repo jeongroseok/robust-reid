@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import Callback
 from torch import Tensor
 from torch.utils.tensorboard.writer import SummaryWriter
 
-from .models.gan import GAN
+from .models import RobustReID
 
 
 class LatentSpaceVisualizer(Callback):

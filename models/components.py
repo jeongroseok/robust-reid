@@ -135,33 +135,33 @@ class Generator(nn.Sequential):
             # FC
             nn.Linear(related_latent_dim + unrelated_latent_dim, 512),
             nn.BatchNorm1d(512),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2),
             nn.Dropout(0.2),
             nn.Unflatten(1, (-1, 1, 1)),
             # 1st block 1x1 -> 4x2
             nn.ConvTranspose2d(512, 512, (4, 2), bias=False),
             nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2),
             # 2nd block 4x2 -> 8x4
             nn.ConvTranspose2d(512, 512, 4, 2, 1, bias=False),
             nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2),
             # 3rd block 8x4 -> 16x8
             nn.ConvTranspose2d(512, 512, 4, 2, 1, bias=False),
             nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2),
             # 4th block 16x8 -> 32x16
             nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False),
             nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2),
             # 5th block 16x8 -> 32x16
             nn.ConvTranspose2d(256, 128, 4, 2, 1, bias=False),
             nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2),
             # 6th block 16x8 -> 64x128
             nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False),
             nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2),
             # 7th block 16x8 -> 64x128
             nn.ConvTranspose2d(64, 3, 4, 2, 1, bias=False),
             nn.Tanh(),

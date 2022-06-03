@@ -1,29 +1,17 @@
-import torch
-import torch.nn as nn
-from PIL import Image
-from pl_bolts.transforms.dataset_normalizations import imagenet_normalization
-from torchvision import models
-from torchvision.models.resnet import Bottleneck, resnet50
-from torchvision.transforms import Compose, ToTensor
-from pytorch_lightning import LightningModule, Trainer, seed_everything
+from pytorch_lightning import Trainer, seed_everything
 
-from datamodules.market1501 import Market1501, PairedMarket1501DataModule
-from models.components import (
-    Classifer,
-    Discriminator,
-    Generator,
-    RelatedEncoder,
-    ResnetBackbone,
-    UnrelatedEncoder,
-)
+from datamodules.market1501 import PairedMarket1501DataModule
+from models import RobustReID
 
 
 def main():
     seed_everything(42)
 
-    dm = PairedMarket1501DataModule('./data')
-    dm.setup()
-    batch = next(iter(dm.train_dataloader()))
+    datamodule = PairedMarket1501DataModule("./data", batch_size=16, num_workers=2)
+    model = RobustReID()
+
+    trainer = Trainer(gpus=-1)
+    trainer.fit(model, datamodule=datamodule)
     pass
 
 

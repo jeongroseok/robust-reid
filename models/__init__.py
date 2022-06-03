@@ -10,7 +10,7 @@ from torchmetrics.retrieval.average_precision import RetrievalMAP
 from .components import *
 
 
-class GAN(pl.LightningModule):
+class RobustReID(pl.LightningModule):
     class __HPARAMS:
         backbone_type: str
         related_latent_dim: int
@@ -55,7 +55,7 @@ class GAN(pl.LightningModule):
         self.automatic_optimization = False
 
         self.criterion_recon = nn.L1Loss()
-        self.criterion_adv = nn.BCELoss()
+        self.criterion_adv = nn.BCEWithLogitsLoss()
         self.criterion_cls = nn.CrossEntropyLoss()
         self.criterion_kld = nn.KLDivLoss(reduction="batchmean")
 
@@ -92,8 +92,8 @@ class GAN(pl.LightningModule):
 
         opt_gen = optim.Adam(
             (
-                list(self.backbone.parameters())
-                + list(self.related_encoder.parameters())
+                # list(self.backbone.parameters()) +
+                list(self.related_encoder.parameters())
                 + list(self.unrelated_encoder.parameters())
                 + list(self.classifier.parameters())
                 + list(self.generator.parameters())
@@ -107,8 +107,8 @@ class GAN(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         optims: tuple[optim.Adam, optim.Adam] = self.optimizers()
         opt_gen, opt_dis = optims
+
         opt_gen.zero_grad()
-        opt_dis.zero_grad()
 
         (x_a, x_p, x_n), (
             y_a,
@@ -116,11 +116,13 @@ class GAN(pl.LightningModule):
             y_n,
         ) = batch
 
-        f_r_a, f_u_a = self.backbone(
-            x_a
-        )  # feature_related_anchor, feature_unrelated_anchor
-        f_r_p, f_u_p = self.backbone(x_p)
-        f_r_n, f_u_n = self.backbone(x_n)
+        self.backbone.eval()
+        with torch.no_grad():
+            f_r_a, f_u_a = self.backbone(
+                x_a
+            )  # feature_related_anchor, feature_unrelated_anchor
+            f_r_p, f_u_p = self.backbone(x_p)
+            f_r_n, f_u_n = self.backbone(x_n)
         r_a = self.related_encoder(f_r_a)  # related_anchor
         r_p = self.related_encoder(f_r_p)
         r_n = self.related_encoder(f_r_n)
@@ -140,6 +142,9 @@ class GAN(pl.LightningModule):
         accuracy_p = self.metric_accuracy(y_hat_r_p, y_p)
         accuracy_n = self.metric_accuracy(y_hat_r_n, y_n)
         accuracy_related = (accuracy_a + accuracy_p + accuracy_n) / 3
+
+        self.log("L_{R}", loss_related, prog_bar=True)
+        self.log("accuracy", accuracy_related, prog_bar=True)
 
         # L_{unrelated}: KL Divergence
         loss_a: Tensor = torch.distributions.kl_divergence(q_a, p_a)
@@ -171,8 +176,11 @@ class GAN(pl.LightningModule):
         """
         x_hat_an = self.generator(r_a, u_n)
         x_hat_na = self.generator(r_n, u_a)
-        f_r_an, f_u_an = self.backbone(x_hat_an)
-        f_r_na, f_u_na = self.backbone(x_hat_na)
+
+        self.backbone.eval()
+        with torch.no_grad():
+            f_r_an, f_u_an = self.backbone(x_hat_an)
+            f_r_na, f_u_na = self.backbone(x_hat_na)
 
         # L^{related code}_{recon}: L1
         r_an = self.related_encoder(f_r_an)
@@ -233,7 +241,36 @@ class GAN(pl.LightningModule):
             + loss_adv_gen_na
         ) / 7
 
+        # G 학습 시작
+        loss_gen_all = (
+            (loss_related * self.hparams.related_coeff)
+            + (loss_unrelated * self.hparams.unrelated_coeff)
+            + (
+                (loss_sameimg_recon + loss_diffimg_recon)
+                / 2
+                * self.hparams.img_recon_coeff
+            )
+            + (
+                (loss_relatedcode_recon + loss_unrelatedcode_recon)
+                / 2
+                * self.hparams.code_recon_coeff
+            )
+            + (loss_adv_gen * self.hparams.adv_coeff)
+        )
+        self.manual_backward(loss_gen_all)
+        opt_gen.step()
+
         # D 입장
+        opt_dis.zero_grad()
+
+        d_fake_a, _ = self.discriminator(x_hat_a.detach())
+        d_fake_p, _ = self.discriminator(x_hat_p.detach())
+        d_fake_n, _ = self.discriminator(x_hat_n.detach())
+        d_fake_ap, _ = self.discriminator(x_hat_ap.detach())
+        d_fake_pa, _ = self.discriminator(x_hat_pa.detach())
+        d_fake_an, _ = self.discriminator(x_hat_an.detach())
+        d_fake_na, _ = self.discriminator(x_hat_na.detach())
+
         loss_adv_dis_fake_a = self.criterion_adv(
             d_fake_a, torch.zeros_like(d_fake_a)
         )
@@ -281,6 +318,9 @@ class GAN(pl.LightningModule):
             loss_adv_dis_real_a + loss_adv_dis_real_n + loss_adv_dis_real_p
         ) / 3
 
+        # D 학습 시작
+        loss_adv_dis = (loss_adv_dis_fake + loss_adv_dis_real) / 2
+
         # L_{id}: CE
         """
         1. 실제 이미지를 D를 통해 분류 후 D 학습
@@ -290,24 +330,20 @@ class GAN(pl.LightningModule):
         loss_id_n = self.criterion_cls(y_hat_n, y_n)
         loss_id = (loss_id_a + loss_id_p + loss_id_n) / 3
 
-        # 학습 시작
-        loss_gen_all = (
-            (loss_related * self.hparams.related_coeff)
-            + (loss_unrelated * self.hparams.unrelated_coeff)
-            + (loss_sameimg_recon * self.hparams.img_recon_coeff)
-            + (loss_diffimg_recon * self.hparams.img_recon_coeff)
-            + (loss_relatedcode_recon * self.hparams.code_recon_coeff)
-            + (loss_unrelatedcode_recon * self.hparams.code_recon_coeff)
-            + (loss_adv_gen * self.hparams.adv_coeff)
+        loss_dis_all = (loss_adv_dis * self.hparams.adv_coeff) + (
+            loss_id * self.hparams.id_coeff
         )
 
-        loss_dis_all = (
-            (loss_adv_dis_fake * self.hparams.adv_coeff)
-            + (loss_adv_dis_real * self.hparams.adv_coeff)
-            + (loss_id * self.hparams.id_coeff)
-        )
-
-        self.manual_backward(loss_gen_all)
-        opt_gen.step()
         self.manual_backward(loss_dis_all)
         opt_dis.step()
+
+        self.log("L_{U}", loss_unrelated)
+        self.log(
+            "L^{img}_{recon}", (loss_sameimg_recon + loss_diffimg_recon) / 2
+        )
+        self.log(
+            "L^{code}_{recon}",
+            (loss_relatedcode_recon + loss_unrelatedcode_recon) / 2,
+        )
+        self.log("L_{adv} gen", loss_adv_gen)
+        self.log("L_{adv} dis", loss_adv_dis)

@@ -109,12 +109,18 @@ class Market1501DataModule(LightningDataModule):
         if self.normalize:
             mnist_transforms = transform_lib.Compose(
                 [
+                    transform_lib.Resize((256, 128), interpolation=3),
                     transform_lib.ToTensor(),
                     transform_lib.Normalize(mean=(0.5,), std=(0.5,)),
                 ]
             )
         else:
-            mnist_transforms = transform_lib.Compose([transform_lib.ToTensor()])
+            mnist_transforms = transform_lib.Compose(
+                [
+                    transform_lib.Resize((256, 128), interpolation=3),
+                    transform_lib.ToTensor(),
+                ]
+            )
 
         return mnist_transforms
 
@@ -131,7 +137,9 @@ class Market1501DataModule(LightningDataModule):
     ) -> Union[DataLoader, List[DataLoader]]:
         return self._data_loader(self.dataset_test)
 
-    def _data_loader(self, dataset: Dataset, shuffle: bool = False) -> DataLoader:
+    def _data_loader(
+        self, dataset: Dataset, shuffle: bool = False
+    ) -> DataLoader:
         return DataLoader(
             dataset,
             batch_size=self.batch_size,
