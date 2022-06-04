@@ -1,12 +1,29 @@
 from copy import deepcopy
-from turtle import forward
+from typing import Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.models
 from pl_bolts.models.gans.pix2pix.components import PatchGAN
 from torch import Tensor
-from torchvision import models
+
+
+class Encoder:
+    def encode(
+        self, x: torch.Tensor
+    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+        pass
+
+
+class Generator:
+    def generate(self, *features: torch.Tensor) -> torch.Tensor:
+        pass
+
+
+class Classifier:
+    def classify(self, x: torch.Tensor) -> torch.Tensor:
+        pass
 
 
 class ResnetBackbone(nn.Module):
@@ -20,11 +37,11 @@ class ResnetBackbone(nn.Module):
 
         resnet = None
         if type == "resnet18":
-            resnet = models.resnet18(pretrained, progress)
+            resnet = torchvision.models.resnet18(pretrained, progress)
         elif type == "resnet34":
-            resnet = models.resnet34(pretrained, progress)
+            resnet = torchvision.models.resnet34(pretrained, progress)
         elif type == "resnet50":
-            resnet = models.resnet50(pretrained, progress)
+            resnet = torchvision.models.resnet50(pretrained, progress)
         layers = list(resnet.children())[:-2]
 
         self.backbone = nn.Sequential(*layers[:-1])  # layer3까지만 공통으로 사용함
@@ -34,7 +51,7 @@ class ResnetBackbone(nn.Module):
         """
         # 공간정보 유지를 위해 첫번째 블럭 수정
         first_block: Union[
-            models.resnet.Bottleneck, models.resnet.BasicBlock
+            torchvision.models.resnet.Bottleneck, torchvision.models.resnet.BasicBlock
         ] = self.unrelated_branch[0]
 
         # 블럭내의 모든 Conv2d레이어의 stride를 1로 변경
@@ -50,7 +67,7 @@ class ResnetBackbone(nn.Module):
         )
 
         # 두번째 Conv2d레이어의 padding를 1로 변경
-        if isinstance(first_block, models.resnet.Bottleneck):
+        if isinstance(first_block, torchvision.models.resnet.Bottleneck):
             first_block.conv2 = self.__set_conv2d_attr(
                 first_block.conv2, padding=0
             )
@@ -80,7 +97,7 @@ class ResnetBackbone(nn.Module):
         return list(self.modules())[-1].num_features
 
 
-class RelatedEncoder(nn.Sequential):
+class RelatedEncoder(nn.Sequential, Encoder):
     def __init__(
         self, num_features: int = 2048, latent_dim: int = 256
     ) -> None:
@@ -92,8 +109,13 @@ class RelatedEncoder(nn.Sequential):
         )
         self.latent_dim = latent_dim
 
+    def encode(
+        self, x: torch.Tensor
+    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+        return super().forward(x)
 
-class UnrelatedEncoder(nn.Module):
+
+class UnrelatedEncoder(nn.Module, Encoder):
     def __init__(self, num_features: int = 2048, latent_dim: int = 64) -> None:
         super().__init__()
 
@@ -119,15 +141,25 @@ class UnrelatedEncoder(nn.Module):
         z = q.rsample()
         return z, p, q
 
+    def encode(
+        self, x: torch.Tensor
+    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+        z, _, _ = self.forward(x)
+        return z
 
-class Classifer(nn.Sequential):
+
+class BasicClassifer(nn.Sequential, Classifier):
     def __init__(
         self, num_classes: int = 751, num_features: int = 256
     ) -> None:
         super().__init__(nn.Linear(num_features, num_classes))
 
+    def classify(self, x: torch.Tensor) -> torch.Tensor:
+        y_hat = super().forward(x)
+        return y_hat
 
-class Generator(nn.Sequential):
+
+class ISGAN_Generator(nn.Sequential, Generator):
     def __init__(
         self, related_latent_dim: int = 256, unrelated_latent_dim: int = 64
     ) -> None:
@@ -167,13 +199,16 @@ class Generator(nn.Sequential):
             nn.Tanh(),
         )
 
-    def forward(self, related_z: Tensor, unrelated_z: Tensor):
-        z = torch.cat([related_z, unrelated_z], dim=1)
+    def forward(self, related_code: Tensor, unrelated_code: Tensor):
+        z = torch.cat([related_code, unrelated_code], dim=1)
         x = super().forward(z)
         return x
 
+    def generate(self, *features: torch.Tensor) -> torch.Tensor:
+        return self.forward(*features)
 
-class Discriminator(PatchGAN):
+
+class Discriminator(PatchGAN, Classifier):
     def __init__(self, num_classes: int = 751) -> None:
         super().__init__(input_channels=3)
         self.fc = nn.Linear(512, num_classes)
@@ -189,3 +224,7 @@ class Discriminator(PatchGAN):
         x4 = x4.flatten(1)
         y_hat = self.fc(x4)
         return d, y_hat
+
+    def classify(self, x: torch.Tensor) -> torch.Tensor:
+        _, y_hat = self.forward(x)
+        return y_hat
