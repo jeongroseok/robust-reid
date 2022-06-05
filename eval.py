@@ -15,12 +15,13 @@ from torchvision.utils import make_grid
 from datasets.market1501 import Market1501
 from models import RobustReID
 from models.components import Encoder
+from tqdm import tqdm
 
-MODEL_PATH = rf"lightning_logs\version_22\checkpoints\epoch=23-step=22464 copy.ckpt"
+MODEL_PATH = rf"lightning_logs\version_22\checkpoints\epoch=49-step=56160.ckpt"
 DATA_DIR = "./data"
-BATCH_SIZE = 768
+BATCH_SIZE = 512
 NUM_WORKER = 4
-DEVICE = "cpu"
+DEVICE = "cuda"
 
 
 @contextmanager
@@ -52,12 +53,12 @@ def process_data(encoder: Encoder, dataloader: DataLoader):
     codes = []
     targets = []
 
-    for x, y in dataloader:
+    for x, y in tqdm(dataloader):
         x, y = x.to(DEVICE), y.to(DEVICE)
 
         code = encoder.encode(x)
 
-        codes.extend(code.tolist())
+        codes.extend(code.flatten(1).tolist())
         targets.extend(y.tolist())
 
     return (
@@ -86,7 +87,7 @@ def main():
 
     with timer("mAP calculation"):
         results = []
-        for data in zip(preds, query_targets):
+        for data in tqdm(zip(preds, query_targets)):
             pred, target = data
             results.append(
                 retrieval_average_precision(-pred, target == gallery_targets)
