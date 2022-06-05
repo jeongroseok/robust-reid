@@ -1,8 +1,9 @@
+from typing import Tuple, Union
+
 import pytorch_lightning as pl
 import torch
 from torch import nn, optim
 from torchmetrics.classification.accuracy import Accuracy
-from torchmetrics.retrieval.average_precision import RetrievalMAP
 
 from .components_2d_code import *
 
@@ -95,12 +96,12 @@ class RobustReID(pl.LightningModule, Encoder, Generator, Disentangler):
 
     def encode(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+    ) -> Union[Tuple[torch.Tensor, ...], torch.Tensor]:
         related_features, _ = self.backbone(x)
         related_codes = self.related_encoder.encode(related_features)
         return related_codes
 
-    def disentangle(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    def disentangle(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
         return self.forward(x)
 
     def generate(self, *features: torch.Tensor) -> torch.Tensor:
@@ -132,7 +133,7 @@ class RobustReID(pl.LightningModule, Encoder, Generator, Disentangler):
         return [opt_rel, opt_gen, opt_dis]
 
     def training_step(self, batch, batch_idx):
-        optims: tuple[optim.Adam, optim.Adam] = self.optimizers()
+        optims: Tuple[optim.Adam, optim.Adam] = self.optimizers()
         opt_rel, opt_gen, opt_dis = optims
 
         (x_a, x_p, x_n), (

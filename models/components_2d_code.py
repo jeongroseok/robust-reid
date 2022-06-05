@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -12,12 +12,12 @@ from torch import Tensor
 class Encoder:
     def encode(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+    ) -> Union[Tuple[torch.Tensor, ...], torch.Tensor]:
         pass
 
 
 class Disentangler:
-    def disentangle(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    def disentangle(self, x: torch.Tensor) -> Tuple[torch.Tensor, ...]:
         pass
 
 
@@ -129,7 +129,7 @@ class RelatedEncoder(nn.Sequential, Encoder):
 
     def encode(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+    ) -> Union[Tuple[torch.Tensor, ...], torch.Tensor]:
         return super().forward(x)
 
 
@@ -166,7 +166,7 @@ class UnrelatedEncoder(nn.Module, Encoder):
 
     def encode(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, ...], torch.Tensor]:
+    ) -> Union[Tuple[torch.Tensor, ...], torch.Tensor]:
         z, _, _ = self.forward(x)
         return z
 
