@@ -17,9 +17,7 @@ class Encoder:
 
 
 class Disentangler:
-    def disentangle(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, ...]:
+    def disentangle(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         pass
 
 
@@ -120,10 +118,12 @@ class RelatedEncoder(nn.Sequential, Encoder):
         self, num_features: int = 2048, latent_dim: int = 2048
     ) -> None:
         super().__init__(
-            nn.AdaptiveMaxPool2d(1),
-            nn.Flatten(1),
-            nn.Linear(num_features, latent_dim, bias=False),
-            nn.BatchNorm1d(latent_dim),
+            # nn.AdaptiveMaxPool2d(1),
+            nn.Conv2d(num_features, latent_dim, 1, bias=False),
+            nn.BatchNorm2d(latent_dim),
+            # nn.Flatten(1),
+            # nn.Linear(num_features, latent_dim, bias=False),
+            # nn.BatchNorm1d(latent_dim),
         )
         self.latent_dim = latent_dim
 
@@ -141,17 +141,20 @@ class UnrelatedEncoder(nn.Module, Encoder):
 
         self.latent_dim = latent_dim
 
-        self.adaptivemaxpool = nn.AdaptiveAvgPool2d(1)
-        self.flatten = nn.Flatten(1)
-        self.linear_mu = nn.Linear(num_features, latent_dim, bias=False)
-        self.linear_var = nn.Linear(num_features, latent_dim, bias=False)
+        # self.adaptivemaxpool = nn.AdaptiveAvgPool2d(1)
+        self.conv_mu = nn.Conv2d(num_features, latent_dim, 1, bias=False)
+        self.conv_var = nn.Conv2d(num_features, latent_dim, 1, bias=False)
+
+        # self.flatten = nn.Flatten(1)
+        # self.linear_mu = nn.Linear(num_features, latent_dim, bias=False)
+        # self.linear_var = nn.Linear(num_features, latent_dim, bias=False)
 
     def forward(self, x: Tensor):
-        x = self.adaptivemaxpool(x)
-        x = self.flatten(x)
+        # x = self.adaptivemaxpool(x)
+        # x = self.flatten(x)
 
-        mu = self.linear_mu(x)
-        log_var = self.linear_var(x)
+        mu = self.conv_mu(x)
+        log_var = self.conv_var(x)
         std = torch.exp(log_var / 2)
 
         p = torch.distributions.Normal(
@@ -172,7 +175,11 @@ class BasicClassifer(nn.Sequential, Classifier):
     def __init__(
         self, num_classes: int = 751, num_features: int = 256
     ) -> None:
-        super().__init__(nn.Linear(num_features, num_classes))
+        super().__init__(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(1),
+            nn.Linear(num_features, num_classes),
+        )
 
     def classify(self, x: torch.Tensor) -> torch.Tensor:
         y_hat = super().forward(x)
@@ -185,17 +192,17 @@ class ISGAN_Generator(nn.Sequential, Generator):
     ) -> None:
         super().__init__(
             # FC
-            nn.Linear(related_latent_dim + unrelated_latent_dim, 512),
-            nn.BatchNorm1d(512),
+            nn.Conv2d(related_latent_dim + unrelated_latent_dim, 512, 1),
+            nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2),
             nn.Dropout(0.2),
-            nn.Unflatten(1, (-1, 1, 1)),
+            # nn.Unflatten(1, (-1, 1, 1)),
             # 1st block 1x1 -> 4x2
-            nn.ConvTranspose2d(512, 512, (4, 2), bias=False),
+            nn.ConvTranspose2d(512, 512, 1, bias=False),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2),
             # 2nd block 4x2 -> 8x4
-            nn.ConvTranspose2d(512, 512, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(512, 512, 1, 1, bias=False),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2),
             # 3rd block 8x4 -> 16x8

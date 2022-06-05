@@ -1,102 +1,168 @@
-from ctypes import Union
-from typing import List
-
-import numpy as np
 import torch
+from models import Disentangler, Generator
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import Callback
-from torch import Tensor
-
+from torch.utils.tensorboard.writer import SummaryWriter
 from torchvision.utils import make_grid
 
-from models import Encoder, Generator
 
-def __(images):
-    pass
+class __SampleRequiredCallback(Callback):
+    def _ensure_exists_samples(self, trainer: Trainer, model: LightningModule):
+        class _Samples:
+            anchors: torch.Tensor = None
+            positives: torch.Tensor = None
+            negatives: torch.Tensor = None
+            num_samples: int = 0
 
-class CodeInterpolator(Callback):
+        (a, p, n), _ = next(iter(trainer.train_dataloader))
+
+        self._samples = _Samples()
+        self._samples.anchors = a.to(model.device)
+        self._samples.positives = p.to(model.device)
+        self._samples.negatives = n.to(model.device)
+        self._samples.num_samples = a.shape[0]
+
+
+class ReconstructionVisualizer(__SampleRequiredCallback):
     def __init__(
         self,
-        range_start: int = -5,
-        range_end: int = 5,
-        steps: int = 11,
         normalize: bool = True,
     ):
-        """
-        Args:
-            range_start: default -5
-            range_end: default 5
-            steps: number of step between start and end
-            normalize: default True (change image to (0, 1) range)
-        """
         super().__init__()
-        self.range_start = range_start
-        self.range_end = range_end
-        self.num_samples = num_samples
         self.normalize = normalize
-        self.steps = steps
-        """
-        1. pick images
-        2. interpolate
-        3. make image
-        4. logging
-        """
 
-    def on_fit_start(self, trainer: Trainer, pl_module):
-        (a, p, n), _ = next(iter(trainer.train_dataloader))
-        self.__images = {"anchor": a, "positive": p, "negative": n}
-
-    def on_epoch_end(
-        self,
-        trainer: Trainer,
-        pl_module: Union[LightningModule, Generator, Encoder],
-    ) -> None:
+    def on_epoch_end(self, trainer: Trainer, model: LightningModule) -> None:
         if trainer.train_dataloader is None:
             return
 
-        images = self.__interpolate(
-            pl_module, latent_dim=pl_module.hparams.latent_dim
-        )
-        images = torch.cat(images, dim=0)
+        self._ensure_exists_samples(trainer, model)
 
-        num_rows = self.steps
-        grid = make_grid(images, nrow=num_rows, normalize=self.normalize)
-        str_title = f"{pl_module.__class__.__name__}_latent_space"
-        trainer.logger.experiment.add_image(
-            str_title, grid, global_step=trainer.global_step
-        )
+        writer: SummaryWriter = trainer.logger.experiment
 
-    def __interpolate(
-        self, pl_module: LightningModule, latent_dim: int
-    ) -> List[Tensor]:
-        images = []
         with torch.no_grad():
-            pl_module.eval()
-            for z1 in np.linspace(
-                self.range_start, self.range_end, self.steps
-            ):
-                for z2 in np.linspace(
-                    self.range_start, self.range_end, self.steps
-                ):
-                    # set all dims to zero
-                    z = torch.zeros(
-                        self.num_samples, latent_dim, device=pl_module.device
-                    )
+            model.eval()
+            encoder: Disentangler = model
+            generator: Generator = model
 
-                    # set the fist 2 dims to the value
-                    z[:, 0] = torch.tensor(z1)
-                    z[:, 1] = torch.tensor(z2)
+            anc_rel, anc_unrel = encoder.disentangle(self._samples.anchors)
+            reconstructed = generator.generate(anc_rel, anc_unrel)
 
-                    # sample
-                    # generate images
-                    img = pl_module(z)
+        grid = make_grid(
+            torch.cat(
+                [
+                    self._samples.anchors,
+                    reconstructed,
+                ],
+                dim=2,
+            ).sigmoid(),
+            nrow=self._samples.num_samples
+        )
+        writer.add_image(
+            "reconstruction", grid, global_step=trainer.global_step
+        )
 
-                    if len(img.size()) == 2:
-                        img = img.view(self.num_samples, *pl_module.img_dim)
 
-                    img = img[0]
-                    img = img.unsqueeze(0)
-                    images.append(img)
+class CodeSwappingVisualizer(__SampleRequiredCallback):
+    def __init__(
+        self,
+        normalize: bool = True,
+    ):
+        super().__init__()
+        self.normalize = normalize
 
-        pl_module.train()
-        return images
+    def on_epoch_end(self, trainer: Trainer, model: LightningModule) -> None:
+        if trainer.train_dataloader is None:
+            return
+
+        self._ensure_exists_samples(trainer, model)
+
+        writer: SummaryWriter = trainer.logger.experiment
+
+        with torch.no_grad():
+            model.eval()
+            encoder: Disentangler = model
+            generator: Generator = model
+
+            anc_rel, anc_unrel = encoder.disentangle(self._samples.anchors)
+            pos_rel, pos_unrel = encoder.disentangle(self._samples.positives)
+            neg_rel, neg_unrel = encoder.disentangle(self._samples.negatives)
+
+            # self identity generation
+            generated_by_self_id = generator.generate(pos_rel, anc_unrel)
+
+            # cross identity generation
+            generated_by_cross_id = generator.generate(neg_rel, anc_unrel)
+
+        grid_self = make_grid(
+            torch.cat(
+                [
+                    self._samples.anchors,
+                    self._samples.positives,
+                    generated_by_self_id,
+                ],
+                dim=2,
+            ).sigmoid(),
+            nrow=self._samples.num_samples
+        )
+        grid_cross = make_grid(
+            torch.cat(
+                [
+                    self._samples.anchors,
+                    self._samples.negatives,
+                    generated_by_cross_id,
+                ],
+                dim=2,
+            ).sigmoid(),
+            nrow=self._samples.num_samples
+        )
+
+        writer.add_image(
+            "cross_identity_generation",
+            grid_cross,
+            global_step=trainer.global_step,
+        )
+        writer.add_image(
+            "self_identity_generation",
+            grid_self,
+            global_step=trainer.global_step,
+        )
+
+
+class CodeInterpolator(__SampleRequiredCallback):
+    def __init__(self, steps: int = 11, normalize: bool = True):
+        super().__init__()
+        self.normalize = normalize
+        self.steps = steps
+
+    def on_epoch_end(self, trainer: Trainer, model: LightningModule) -> None:
+        if trainer.train_dataloader is None:
+            return
+
+        self._ensure_exists_samples(trainer, model)
+
+        writer: SummaryWriter = trainer.logger.experiment
+
+        with torch.no_grad():
+            model.eval()
+            encoder: Disentangler = model
+            generator: Generator = model
+
+            anc_rel, anc_unrel = encoder.disentangle(self._samples.anchors)
+            pos_rel, pos_unrel = encoder.disentangle(self._samples.positives)
+            neg_rel, neg_unrel = encoder.disentangle(self._samples.negatives)
+
+            # related code interpolation
+            imgs = []
+            for weight in torch.linspace(0, 1, self.steps):
+                interpolated_rel = torch.lerp(anc_rel, neg_rel, weight)
+                generated = generator.generate(interpolated_rel, anc_unrel)
+                imgs.append(generated)
+            grid = make_grid(imgs, normalize=self.normalize)
+
+            # unrelated code interpolation
+            imgs = []
+            for weight in torch.linspace(0, 1, self.steps):
+                interpolated_unrel = torch.lerp(anc_unrel, neg_unrel, weight)
+                generated = generator.generate(anc_rel, interpolated_unrel)
+                imgs.append(generated)
+            grid = make_grid(imgs, normalize=self.normalize)

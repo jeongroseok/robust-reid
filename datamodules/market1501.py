@@ -111,7 +111,11 @@ class Market1501DataModule(LightningDataModule):
                 [
                     transform_lib.Resize((256, 128), interpolation=3),
                     transform_lib.ToTensor(),
-                    transform_lib.Normalize(mean=(0.5,), std=(0.5,)),
+                    transform_lib.Normalize(
+                        mean=(0.485, 0.456, 0.406),
+                        std=(0.229, 0.224, 0.225),
+                        inplace=True,
+                    ),
                 ]
             )
         else:
